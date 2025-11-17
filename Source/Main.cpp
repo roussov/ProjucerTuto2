@@ -1,5 +1,5 @@
 #include <JuceHeader.h>
-#include "PlayingSoundFilesTutorial_01.h"
+#include "TahoeFeel.h"
 
 class Application    : public juce::JUCEApplication
 {
@@ -86,4 +86,9 @@ private:
 
 //==============================================================================
 START_JUCE_APPLICATION (Application)
+
+
+//==============================================================================
+START_JUCE_APPLICATION (Application)
+
 
