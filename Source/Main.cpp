@@ -1,5 +1,5 @@
 #include <JuceHeader.h>
-#include "AppleFeel.h"
+#include "UnixMatrix.h"
 
 class Application    : public juce::JUCEApplication
 {
@@ -12,7 +12,7 @@ public:
 
     void initialise (const juce::String&) override
     {
-        mainWindow.reset (new MainWindow ("PlayingSoundFilesTutorial", std::make_unique<MainContentComponent>(), *this));
+        mainWindow.reset (new MainWindow ("UnixMatrix", std::make_unique<MainContentComponent>(), *this));
     }
 
     void shutdown() override                         { mainWindow = nullptr; }
@@ -88,8 +88,6 @@ private:
 START_JUCE_APPLICATION (Application)
 
 
-//==============================================================================
-START_JUCE_APPLICATION (Application)
 
 
 
