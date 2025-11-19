@@ -82,14 +82,15 @@ public:
 
    juce::Font getTextButtonFont (juce::TextButton&, int height) override
    {
-       auto mono = juce::Font::getDefaultMonospacedFontName();
-       return juce::Font (mono, (float) juce::jmin (height - 4, 14), juce::Font::plain);
+       auto mono  = juce::Font::getDefaultMonospacedFontName();
+       auto size  = (float) juce::jmin (height - 4, 14);
+       return juce::Font (juce::FontOptions (mono, size, juce::Font::plain));
    }
 
    juce::Font getLabelFont (juce::Label&) override
    {
        auto mono = juce::Font::getDefaultMonospacedFontName();
-       return juce::Font (mono, 12.0f, juce::Font::plain);
+       return juce::Font (juce::FontOptions (mono, 12.0f, juce::Font::plain));
    }
 
    void drawButtonBackground (juce::Graphics& g,
@@ -155,14 +156,25 @@ public:
        loopingToggle.setButtonText ("Loop");
        loopingToggle.onClick = [this] { loopButtonChanged(); };
 
+       addAndMakeVisible (&volumeSlider);
+       volumeSlider.setRange (0.0, 1.0, 0.01);
+       volumeSlider.setValue (1.0);
+       volumeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+       volumeSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+       volumeSlider.onValueChange = [this]
+       {
+           targetGain = (float) volumeSlider.getValue();
+       };
+
        addAndMakeVisible (&currentPositionLabel);
        currentPositionLabel.setText ("Stopped", juce::dontSendNotification);
-       currentPositionLabel.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
+       currentPositionLabel.setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain)));
        currentPositionLabel.setJustificationType (juce::Justification::centred);
 
        setSize (300, 200);
 
        formatManager.registerBasicFormats();
+
        transportSource.addChangeListener (this);
 
        setAudioChannels (2, 2);
@@ -189,6 +201,40 @@ public:
        }
 
        transportSource.getNextAudioBlock (bufferToFill);
+
+       if (auto* buffer = bufferToFill.buffer)
+       {
+           const auto gain = targetGain.get();
+           if (gain != 1.0f)
+               buffer->applyGain (bufferToFill.startSample, bufferToFill.numSamples, gain);
+       }
+
+       auto* buffer = bufferToFill.buffer;
+       if (buffer != nullptr && bufferToFill.numSamples > 0 && buffer->getNumChannels() > 0)
+       {
+           const int numChannels = buffer->getNumChannels();
+           const int startSample = bufferToFill.startSample;
+           const int numSamples  = bufferToFill.numSamples;
+
+           float maxSample = 0.0f;
+
+           for (int ch = 0; ch < numChannels; ++ch)
+           {
+               auto* data = buffer->getReadPointer (ch, startSample);
+               for (int i = 0; i < numSamples; ++i)
+               {
+                   auto s = std::abs (data[i]);
+                   if (s > maxSample)
+                       maxSample = s;
+               }
+           }
+
+           lastLevel = maxSample;
+       }
+       else
+       {
+           lastLevel = 0.0f;
+       }
    }
 
    void releaseResources() override
@@ -199,6 +245,30 @@ public:
    void paint (juce::Graphics& g) override
    {
        g.fillAll (juce::Colours::black); // fond terminal / Matrix
+
+       auto bounds = getLocalBounds();
+       const int meterHeight = 40;
+       auto meterArea = bounds.removeFromBottom (meterHeight);
+
+       g.setColour (juce::Colour::fromRGB (0, 255, 70)); // vert Matrix
+
+       const int numBars = meterHistorySize;
+       if (numBars > 0)
+       {
+           const float barWidth = (float) meterArea.getWidth() / (float) numBars;
+           for (int i = 0; i < numBars; ++i)
+           {
+               const int index = (meterWriteIndex + i) % meterHistorySize;
+               const float level = juce::jlimit (0.0f, 1.0f, meterLevels[index]);
+
+               const int barH = (int) ((float) meterArea.getHeight() * level);
+               const int x    = meterArea.getX() + (int) (barWidth * (float) i);
+               const int y    = meterArea.getBottom() - barH;
+
+               if (barH > 0)
+                   g.fillRect (x, y, (int) juce::jmax (1.0f, barWidth - 1.0f), barH);
+           }
+       }
    }
 
    void resized() override
@@ -213,6 +283,7 @@ public:
        pauseButton.setBounds          (margin, y, getWidth() - 2 * margin, h); y += h + gap;
        stopButton.setBounds           (margin, y, getWidth() - 2 * margin, h); y += h + gap;
        loopingToggle.setBounds        (margin, y, getWidth() - 2 * margin, h); y += h + gap;
+       volumeSlider.setBounds         (margin, y, getWidth() - 2 * margin, h); y += h + gap;
        currentPositionLabel.setBounds (margin, y, getWidth() - 2 * margin, h);
    }
 
@@ -232,6 +303,14 @@ public:
 
    void timerCallback() override
    {
+       {
+           const auto level = lastLevel.get();
+           meterLevels[meterWriteIndex] = level;
+           meterWriteIndex = (meterWriteIndex + 1) % meterHistorySize;
+       }
+
+       repaint();
+
        if (transportSource.isPlaying())
        {
            juce::RelativeTime position (transportSource.getCurrentPosition());
@@ -260,6 +339,12 @@ public:
    }
 
 private:
+   static constexpr int meterHistorySize = 64;
+   float meterLevels[meterHistorySize] = {};
+   int meterWriteIndex = 0;
+   juce::Atomic<float> lastLevel { 0.0f };
+   juce::Atomic<float> targetGain { 1.0f };
+
    UnixMatrixLookAndFeel unixMatrixTheme;
 
    enum TransportState
@@ -372,6 +457,7 @@ private:
    juce::TextButton pauseButton;
    juce::TextButton stopButton;
    juce::ToggleButton loopingToggle;
+   juce::Slider volumeSlider;
    juce::Label currentPositionLabel;
 
    std::unique_ptr<juce::FileChooser> chooser;
